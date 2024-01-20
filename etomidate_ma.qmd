@@ -1,0 +1,658 @@
+---
+title: "Inside the black box: Random effects meta-analysis with zero heterogeneity"
+editor: source
+author:
+  - name: Thomas Payne
+    email: tompayne302@gmail.com
+    affiliations: 
+        - id: usyd
+          name: University of Sydney
+          department: Faculty of Medicine and Health
+          address: Camperdown
+          city: Sydney
+          state: NSW
+          postal-code: 2006
+        - id: rmh
+          name: The Royal Melbourne Hospital
+          address: Parkville
+          city: Melbourne
+          state: Victoria
+          postal-code: 3052
+    attributes:
+        corresponding: true
+  - name: John A. Loadsman
+    affiliations: 
+        - ref: usyd
+        - id: rpa_anos
+          name: Royal Prince Alfred Hospital
+          department: Department of Anaesthetics
+          address: Camperdown
+          city: Sydney
+          state: NSW
+          postal-code: 2050
+keywords: 
+  - Meta-analysis
+  - Heterogeneity
+  - Frequentism
+  - Random effects
+  - Fixed effects
+date: last-modified
+bibliography: references.bib
+link-citations: true
+format:
+  elsevier-pdf:
+    include-in-header: 
+      text: |
+        \usepackage{lscape}
+        \newcommand{\blandscape}{\begin{landscape}}
+        \newcommand{\elandscape}{\end{landscape}}
+        \pagenumbering{gobble}
+    number-sections: false
+    keep-tex: true
+    journal:
+      name: Journal of Critical Care
+      formatting: review
+      model: 3p
+      cite-style: number
+crossref:
+  custom:
+    - kind: float
+      key: suppfig
+      latex-env: suppfig
+      reference-prefix: Supplementary Figure S
+      space-before-numbering: false
+      latex-list-of-description: Supplementary Figure
+    - kind: float
+      key: realtbl
+      latex-env: realtbl
+      reference-prefix: Table
+      space-before-numbering: true
+      latex-list-of-description: Interesting Table
+    - kind: float
+      key: supptbl
+      latex-env: supptbl
+      reference-prefix: Supplementary Table S
+      space-before-numbering: false
+      latex-list-of-description: Supplementary Table
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(ggplot2)
+library(ggpubr)
+library(gridExtra)
+library(ggrepel)
+library(knitr)
+library(kableExtra)
+library(jtools)
+library(broom)
+library(lme4)
+library(gt)
+library(gtsummary)
+library(pwr)
+library(psych)
+library(corrplot)
+library(Hmisc)
+library(glmmTMB)
+library(AER)
+library(rms)
+library(modelsummary)
+library(ggeffects)
+library(mgcv)
+library(DHARMa)
+library(mgcViz)
+library(afex)
+library(patchwork)
+library(sandwich)
+library(quantreg)
+library(quarto)
+library(rbbt)
+library(pscl)
+library(lqmm)
+library(epiR)
+library(metafor)
+
+# render to all formats: quarto_render(input = "/Users/thomaspayne/Documents/MPhil/Cytokines_AKI/experiment/experiment.qmd", output_format = "all")
+# render to html only: quarto_render(input = "/Users/thomaspayne/Documents/MPhil/Cytokines_AKI/experiment/experiment.qmd", output_format = "html")
+
+knitr::opts_chunk$set(echo = F, message = F, warning = F, error = T, 
+                      fig.height = 5, out.width = "100%", 
+                      dev = "png", dpi = 300, cache = T)
+
+import_path_mac <- '/Users/thomaspayne/Documents/MPhil/Landoni_etomidate/'
+export_path_mac <- '/Users/thomaspayne/Documents/MPhil/Landoni_etomidate/'
+
+## Set up the data
+
+
+
+theme_nice <- function() {
+  theme_minimal(base_family = "Verdana") +
+    theme(panel.grid.minor = element_blank(),
+          plot.title = element_text(family = "Verdana", face = "bold"),
+          axis.text = element_text(size = 12),
+          strip.text = element_text(family = "Verdana", face = "bold",
+                                    size = rel(0.75), hjust = 0),
+          strip.background = element_rect(fill = "grey90", color = NA))
+}
+
+# Set the ggplot theme
+theme_set(theme_nice())
+
+forest_theme <- theme(plot.title = ggtext::element_textbox_simple(
+                                        margin = margin(t = 0, b = 10),
+                                        padding = margin(rep(6, 4)),
+                                        fill = "grey90",
+                                        linetype = 1,
+                                        box.color = "black",
+                                        r = unit(9, "pt"),
+                                        halign = 0,
+                                        face = "bold",
+                                        lineheight = .9,
+                                        size = 12))
+
+# Set the gt theme
+gt_theme_nice <- function(data, ...) {
+  data %>%
+    gt::tab_style(
+    style = gt::cell_text(weight = "bold"),
+    locations = gt::cells_row_groups(groups = everything())) %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "#e4e8ed"),
+      cell_text(weight = "bold")
+      ),
+    locations = cells_row_groups()) %>%
+    # if missing, replace NA w/ ---
+    fmt_missing(
+      columns = everything(),
+      missing_text = "---"
+    ) %>%
+    # add exact color from PFF table to spanners
+    tab_style(
+      style = list(
+        cell_fill(color = "#d4ebf2"),
+        cell_text(color = "#585d63"),
+        cell_borders(style = "solid", color = "white")),
+      locations = list(
+        cells_column_spanners(
+          spanners = everything()
+        )
+      )
+    ) %>%
+    # Make column labels and spanners all caps
+    opt_all_caps() %>%
+    # add row striping
+    opt_row_striping() %>%
+    # change overall table styling for borders and striping
+    tab_options(
+      column_labels.background.color = "#585d63",
+      column_labels.font.size = 14,
+      table_body.hlines.color = "#f6f7f7",
+      table.font.size = 12,
+      heading.align = "left",
+      heading.title.font.size = 15,
+      row.striping.background_color = "#f9f9fb",
+      row_group.font.size = 14,
+      data_row.padding = px(4),
+      table_body.vlines.style = "solid",
+      column_labels.vlines.style = "solid",
+      column_labels.vlines.color = "white",
+      ...
+    ) %>%
+    # change font to Lato throughout (note no need to have Lato locally!)
+    opt_table_font(
+      font = c(
+        google_font(name = "Lato"),
+        default_fonts()
+      )
+    )
+}
+
+# This is to control the size of the outputs in the PDF - just using "\tiny" won't work for landscape-orientation tables
+default_chunk_hook  <- knitr::knit_hooks$get("chunk")
+
+latex_font_size <- c("Huge", "huge", "LARGE", "Large", 
+                     "large", "normalsize", "small", 
+                     "footnotesize", "scriptsize", "tiny")
+
+knitr::knit_hooks$set(chunk = function(x, options) {
+  x <- default_chunk_hook(x, options)
+  if(options$size %in% latex_font_size) {
+    paste0("\n \\", options$size, "\n\n", 
+      x, 
+      "\n\n \\normalsize"
+    )
+  } else {
+    x
+  }
+})
+
+data <- data.frame(
+  Author = c("Absalom 1999", "Schenarts 2001", "Jacoby 2006", "Hildreth 2008", "Jabre 2009", "Tekwani 2010", 
+               "Punt 2014", "Driver 2014", "Smischney 2019", "Powers 2021", "Matchett 2022"),
+  etomidate_dead = c(5, 0, 13, 2, 93, 26, 61, 3, 26, 0, 90),
+  etomidate_total = c(17, 16, 44, 18, 328, 63, 161, 28, 76, 208, 400),
+  control_dead = c(3, 1, 16, 0, 87, 21, 54, 1, 25, 0, 59),
+  control_total = c(17, 15, 44, 12, 327, 59, 140, 26, 84, 220, 401)) %>%
+  mutate(etomidate_alive = etomidate_total - etomidate_dead,
+         control_alive = control_total - control_dead)
+
+IVdat <- escalc(measure="RR", ai=etomidate_dead, n1i=etomidate_total, 
+                ci=control_dead, n2i=control_total, data=data, slab = Author)
+
+res_random <- rma(yi, vi, data=IVdat, method = "DL")
+
+res_mh <- rma.mh(measure="RR", ai=etomidate_dead, n1i=etomidate_total,
+              ci=control_dead, n2i=control_total, data=data)
+
+```
+
+# Correspondence
+
+Dear Editor,
+
+We read with interest the recent letters [@lavin2024lettereditoretomidate; @horst2024lettereditoretomidate; @brown2024lettereditoretomidate] regarding the systematic review and meta-analysis by Kotani and colleagues [@kotani2023etomidateinductionagent]. The correspondents make a similar argument: the use of a fixed effect model by Kotani and colleagues is inappropriate due to clinical heterogeneity across the included studies, and a random effects model would be more suitable to incorporate such heterogeneity. Two of these letters include random effects analyses showing (at the traditional p = 0.05 threshold) that we cannot reject the null hypothesis of no effect of etomidate on mortality (relative risk = 1.14; 95% confidence interval (CI): 0.99 to 1.31) [@horst2024lettereditoretomidate; @lavin2024lettereditoretomidate], contrasting the results of fixed effect model reported by Kotani and colleagues (RR = 1.14, 95%CI: 1.01 to 1.33). We agree that empirically the difference in results between the two approaches is small. However, relying on the p = 0.05 threshold, two groups of correspondents suggest that the more conservative (and 'statistically insignificant') results of their random effects model is due to additional consideration of heterogeneity [@horst2024lettereditoretomidate; @lavin2024lettereditoretomidate], without addressing the elephant in the room: the estimate for heterogeneity in the random effects models is 0, meaning the random effects results should be identical to the fixed effect results. In this correspondence we demonstrate how: 1) the fixed and random effects estimates differ due to small difference in formulae, not the existence of heterogeneity; 2) this discrepancy doesn't teach us anything useful about etomidate and mortality; and 3) introducing realistic levels of heterogeneity does reduce our certainty of there being a true difference in mortality. Our analyses were conducted in R (R Foundation for Statistical Computing, Vienna, Austria) using the metafor [@viechtbauer2010conductingmetaanalysesmetafor] and bayesmeta [@rover2020bayesianrandomeffectsmetaanalysis] packages. The code is publicly available at https://github.com/tompayne302/etomidate_ma.
+
+As discussed by the correspondents, in a fixed effect meta-analysis we assume that there is a common 'true' effect size and the only difference between studies' estimates and this common effect size is sampling error [@2009fixedeffectrandomeffectsmodels]. Meanwhile, in a random effects analysis we assume that the studies deviate from a **mean** effect size due to the existence of sampling error *plus* a population-level heterogeneity parameter, which we call $\tau$. The pooled effect size in both a fixed effect and random effects meta-analysis is simply the weighted average of the included studies' observed effect sizes. To calculate this, studies need to be weighted to reflect the number of included participants - bigger studies should have a larger influence on the pooled effect.
+
+The correspondents use an inverse variance method to conduct random effects meta-analysis. In this method, studies are weighted by the inverse of their variance plus the heterogeneity parameter $\tau$. As an example of this weighting approach, let's take the largest study in this meta-analysis, by Jabre and colleagues [@jabre2009etomidateketaminerapid]. The 2x2 results table from this study is shown in @realtbl-jabre.
+
+::: {#realtbl-jabre}
+```{r}
+data.frame("Dead" = c("93 (A)", "87 (C)"),
+           "Alive" = c("235 (B)", "240 (D)"),
+           "Total" = c(328, 327),
+           "Subgroup" = c("Etomidate", "Control")) %>%
+  gt(rowname_col = "Subgroup")
+```
+
+Results of the study by Jabre and colleagues.
+:::
+
+Each of the cells in @realtbl-jabre has been labelled "A", "B", "C", or "D". In an 'inverse variance' random effects meta-analysis, the weight of this study is given by:
+
+$$
+\text{Jabre (2009) study weight (inverse variance method)} = \frac{1}{(\frac{1}{A} + \frac{1}{C} - \frac{1}{A+B} - \frac{1}{C+D}) + \tau} = `r sprintf('%.2f', weights(res_random)[[5]])` \text{\%}
+$$
+
+In cases where $\tau = 0$, the weighting in an inverse variance random effects meta-analysis is **exactly** the same as in inverse variance fixed effect meta-analysis - hence the results should be identical. However, Kotani and colleagues do not use an inverse variance fixed effect method; they use a fixed effect method that was described by Mantel and Haenszel [@statisticalaspectsanalysis], in which the weight of the Jabre study is given by:
+
+$$
+\text{Jabre (2009) study weight (Mantel-Haenszel method)} = \frac{(A + B)C}{N_\text{total}} = `r sprintf('%.2f', weights(res_mh)[[5]])` \text{\%}
+$$
+
+These weighting forumlae are also used in the calculation of the standard error (and hence confidence interval) for the mean effect in both approaches [@deeks2001statisticalmethodsexamining]. The Mantel-Haenszel approach has been suggested to have better statistical properties than the inverse variance method when binary outcome data are sparse (i.e., there are few events, or studies are very small) [@chapter10analysing]. The meta-analysis by Kotani and colleagues contains very little sparse data. Hence, in the present context where the estimate for $\tau$ is 0, there is no reason that one method should provide a more reliable estimate than the other. The difference in results between the inverse variance random effects model and the Mantel-Haenszel fixed effect model is due to a **subtle difference in formulae for study weighting and standard error calculation; nothing to do with population-level heterogeneity.**
+
+However, as discussed by the correspondents, the assumption of zero population-level heterogeneity is almost certainly untenable for this intervention and outcome. Point estimates of zero heterogeneity in random effects meta-analysis are often due to imprecise estimation of $\tau$ due to a paucity of studies. The use of point estimates also neglects the uncertainty in the estimation of $\tau$, and that a range of plausible values exists. Hence, an important sensitivity analysis in this context is to artificially introduce heterogeneity into the model and assess the impact on the findings.
+
+Trace plots were initially described in 1981 by Rubin [@rubin1981estimationparallelrandomized], and their resurgence has been advocated by Rover and colleagues [@roverhowtraceplots]. Trace plots demonstrate the effect of various levels of population-level heterogeneity ($\tau$) on the pooled mean effect size and best linear unbiased predictions of the study-specific true effect sizes. They also provide a Q-profile confidence interval for $\tau$, as opposed to the singular point estimate that is used to compute the mean effect. A trace plot of the etomidate meta-analysis is shown in @fig-traceplot.
+
+The bottom of @fig-traceplot shows the common x-axis for all plots, which represents values for heterogeneity ($\tau$) from 0.0 up to 0.7. As shown in (A), at the point of $\tau = 0$, all of the studies share a common study-specific effect size, which is the essential assumption of the fixed effect model. As heterogeneity ($\tau$) increases, the study-specific estimates trend towards their observed (reported) effect size. Meanwhile, the overall mean effect gradually increases to favour the control arm. This is because, in the inverse variance random effects model, greater heterogeneity pulls the estimate of the mean effect towards smaller studies, which generally favoured the control arm in this meta-analysis. Plot (B) shows the trend of the mean effect and 95% confidence interval across various levels of heterogeneity; the width of the 95% confidence interval for the mean increases with increasing heterogeneity, which is the expected property of the random effects model. However, the flat line in (B) suggests the estimate of the overall mean effect is relatively insensitive to the presence of heterogeneity. Plot (C) shows the range of plausible heterogeneity values in this meta-analysis, with the dotted line showing the point estimate of $\tau = 0$. The upper limit of the 95% confidence interval for $\tau$ shows that values up to 0.36 are plausible. In summary, the magnitude and direction of effect are not sensitive to increased heterogeneity; however, we are unable to exclude a non-zero mean effect of etomidate on mortality across plausible and realistic values for heterogeneity.
+
+# References
+
+::: {#refs}
+:::
+
+```{r fig.height = 10, fig.width = 6}
+#| label: fig-traceplot
+#| fig-cap: Trace plot for the meta-analysis reported by Kotani and colleagues. All three plots share a common x-axis shown at the bottom. (A) Study-specific effects and overall effect, across various levels of heterogeneity. The y-axis is in log risk ratio units, hence '0' implies no effect of etomidate on mortality, and values >0 favour control. (B) Plot of the overall mean effect and 95%CI across various levels of heterogeneity. (C) Heterogeneity estimates from the meta-analysis. The dotted line represents the point estimate for tau at 0 (using the DerSimonian-Laird method). The red dotted line represents the upper limit of the 95% confidence interval for tau.
+#| fig-width: 6
+#| fig-height: 10
+
+#  ARGUMENTS:
+#    x                   :  object of class "rma.uni"
+#    mulim, taulim       :  limits of "tau" and "mu" axes
+#    ci                  :  flag indicating whether to also
+#                           show confidence intervals
+#    ylab                :  y-axis label
+#    infinity            :  flag indicating whether to add
+#                           an "infinity" tick mark
+#                           to the "tau" axis
+#    rightmargin         :  width of the right plot margin. May be adjusted
+#                           to provide space for study labels
+#    col                 :  colours for studies
+#    labcol              :  colours for study labels
+#    meanlabel           :  label for overall mean (mu) parameter
+#    meancol, meanlabcol :  color for overall mean and its label
+#    deviance            :  flag indicating whether to also show
+#                           deviance test statistic
+#    devicol             :  colour for deviance
+
+traceplot.rma.uni <- function(x, mulim, mulim_overall, taulim, ci=FALSE, ci_overall = FALSE,
+                              ylab="effect",
+                              infinity=FALSE,
+                              rightmargin=8,
+                              col=RColorBrewer::brewer.pal(12, "Paired"), labcol=col,
+                              meanlabel="Overall mean",
+                              meancol="black", meanlabcol=meancol,
+                              deviance=FALSE, devicol="red3",
+                              ...)
+{
+  stopifnot(require("metafor"), inherits(x, "rma.uni"),
+            missing(mulim) || (length(mulim) == 2),
+            missing(taulim) || (length(taulim) <= 2),
+            is.character(ylab), length(ylab)==1,
+            is.logical(infinity), length(infinity)==1,
+            rightmargin >= 0,
+            is.character(meanlabel), length(meanlabel)==1,
+            length(meancol)==1)
+  q975 <- qnorm(0.975)
+  gridcol <- "grey85"
+  if (length(col)==1) col <- rep(col, x$k)
+  
+  uppertaulim <- function(level=0.95)
+  # hacked version of "conf.int()" function
+  # to circumvent hard-coded upper limit setting
+  {
+    maxtau <- 10  # (the default)
+    ci <- confint(x, level=level, control=list(tau2.max=maxtau^2))$random
+    while (ci["tau","ci.ub"] == maxtau) {
+      maxtau <- maxtau * 2
+      ci <- confint(x, level=level, control=list(tau2.max=maxtau^2))$random
+    }
+    return(ci["tau","ci.ub"])
+  }
+  
+  # convert "taulim" and "mulim" input arguments
+  # to eventual "taurange" and "murange" vectors:
+  if (!missing(taulim) && all(is.finite(taulim))) {
+    if ((length(taulim)==2) && (taulim[1]>=0) && (taulim[2]>taulim[1]))
+      taurange <- taulim
+    else if ((length(taulim)==1) && (taulim>0))
+      taurange <- c(0, taulim)
+    else
+      taurange <- c(0, uppertaulim(0.99)*1.1)
+  } else {
+    taurange <- c(0, uppertaulim(0.99)*1.1)
+  }
+  if (infinity) {
+    xlim <- taurange + c(0, 0.15) * diff(taurange)
+    infx <- xlim[2] + 0.04*diff(xlim) # the "infinity" x-coordinate
+  } else {
+    xlim <- taurange
+    infx <- NA_real_
+  }
+
+  if (missing(mulim)) mulim <- NULL
+  
+  vertlines <- pretty(taurange)
+  # ensure no tickmarks beyond plotted tau range:
+  if (max(vertlines) > (taurange[2] + 0.04*diff(taurange)))
+    vertlines <- vertlines[-length(vertlines)]
+
+  # vector of tau values:
+  tau <- seq(max(c(0,taurange[1]-0.04*diff(taurange))),
+                 taurange[2]+0.04*diff(taurange), le=200)
+  # perform meta-analyses with pre-specified tau values:
+  rmalist <- vector(mode="list", length=length(tau))
+  names(rmalist) <- sprintf("tau=%.3f", tau)
+  # compute several meta analyses (with fixed tau values):
+  for (i in 1:length(tau)) {
+    rmalist[[i]] <- rma.uni(yi   = x$yi,
+                            vi   = x$vi,
+                            slab = x$slab,
+                            tau2 = tau[i]^2)
+  }
+  
+  mutrace <- function(x)
+  {  
+    # conditional moments for individual studies (theta_i): 
+    #cm.indiv   <- x$cond.moment(tau=tau, indiv=TRUE)
+    cm.indiv <- array(NA_real_, dim=c(length(tau), 2, x$k),
+                      dimnames=list(names(rmalist), c("mean","sd"), x$slab))
+    for (i in 1:length(tau)) {
+      cm.indiv[i,,] <- t(as.matrix(blup(rmalist[[i]]))[,c("pred","se")])
+    }
+    # conditional moments for overall mean (mu): 
+    #cm.overall <- x$cond.moment(tau=tau)
+    cm.overall <- matrix(NA_real_, nrow=length(tau), ncol=2,
+                         dimnames=list(names(rmalist), c("mean","sd")))
+    for (i in 1:length(tau)) {
+      cm.overall[i,] <- c(rmalist[[i]]$b, rmalist[[i]]$se)
+    }
+    # determine axis range for "effect" (y-) axis
+    if (!is.null(mulim) && (all(is.finite(mulim)) && (mulim[1] < mulim[2]))) {
+      # user-defined:
+      murange <- mulim
+    } else {
+      # based on data:
+      if (ci){
+        murange <- range(c(range(cm.indiv[,"mean",]-q975*cm.indiv[,"sd",]),
+                           range(cm.indiv[,"mean",]+q975*cm.indiv[,"sd",]),
+                           range(cm.overall[,"mean"]-q975*cm.overall[,"sd"]),
+                           range(cm.overall[,"mean"]+q975*cm.overall[,"sd"])))
+      } else {
+        murange <- range(c(range(cm.indiv[,"mean",]),
+                           range(cm.overall[,"mean"])))
+      }
+      # ensure that estimates are also included:
+      if (infinity) murange <- range(murange, x$yi)
+    }
+
+    plot(taurange, murange, xlim=xlim,
+         type="n", axes=FALSE, xlab="", ylab=ylab, main="", ...)
+    abline(v=vertlines, col=gridcol)
+    abline(h=0, col="black", lty=3, lwd=2)   
+    abline(h=pretty(murange), col=gridcol)
+    abline(v=0, col=grey(0.40))
+    text(x = 0.08, y = 0.02, labels = "\u2191 Favours control", col = "black", cex = 1)
+    text(x = 0.1, y = -0.02, labels = "\u2193 Favours etomidate", col = "black", cex = 1)
+    # grey CI shading:
+    if (ci) {
+      for (i in 1:x$k) {
+        polygon(c(tau, rev(tau)),
+                c(cm.indiv[,"mean",i] - q975*cm.indiv[,"sd",i],
+                  rev(cm.indiv[,"mean",i] + q975*cm.indiv[,"sd",i])),
+                col=grey(0.75, alpha=0.25), border=NA)
+      }
+      polygon(c(tau, rev(tau)),
+              c(cm.overall[,"mean"] - q975*cm.overall[,"sd"],
+                rev(cm.overall[,"mean"] + q975*cm.overall[,"sd"])),
+              col=grey(0.75, alpha=0.25), border=NA)
+    }    
+    # individual estimates:
+    matlines(tau, cm.indiv[,"mean",], col=col, lty=1)
+    if (ci) {
+      matlines(tau, cm.indiv[,"mean",]-q975*cm.indiv[,"sd",], col=col, lty=3)
+      matlines(tau, cm.indiv[,"mean",]+q975*cm.indiv[,"sd",], col=col, lty=3)
+    }
+    # overall mean:
+    lines(tau, cm.overall[,"mean"], col=meancol, lty=2, lwd=1.5)
+    if (ci) {
+      lines(tau, cm.overall[,"mean"]-q975*cm.overall[,"sd"], col=meancol, lty=3, lwd=1.5)
+      lines(tau, cm.overall[,"mean"]+q975*cm.overall[,"sd"], col=meancol, lty=3, lwd=1.5)
+    }
+    if (infinity) {
+      labpos.indiv   <- x$yi
+      labpos.overall <- mean(x$yi)
+      for (i in 1:x$k)
+        lines(c(max(tau), infx),
+              c(cm.indiv[length(tau),"mean",i], labpos.indiv[i]),
+              col=col[i], lty="13", lwd=1.5)
+      lines(c(max(tau), infx),
+            c(cm.overall[length(tau),"mean"], labpos.overall),
+            col=meancol, lty="13", lwd=2.0)
+    } else {
+      labpos.indiv   <- cm.indiv[length(tau),"mean",]
+      labpos.overall <- cm.overall[length(tau),"mean"]
+    }
+    axis(2)
+    for (i in 1:x$k)
+      axis(side=4, at=labpos.indiv[i],
+           labels=x$slab[i], tick=FALSE,
+           col.axis=labcol[i], las=1)
+    axis(side=4, at=labpos.overall,
+         labels=meanlabel, tick=FALSE,
+         col.axis=meanlabcol, las=1)
+    axis(side=4, at=0,
+         labels= "No effect", tick=FALSE,
+         col.axis=meanlabcol, las=1)
+    invisible()
+  }
+  
+  mu_overall <- function(x)
+  {  
+    # conditional moments for individual studies (theta_i): 
+    #cm.indiv   <- x$cond.moment(tau=tau, indiv=TRUE)
+    cm.indiv <- array(NA_real_, dim=c(length(tau), 2, x$k),
+                      dimnames=list(names(rmalist), c("mean","sd"), x$slab))
+    for (i in 1:length(tau)) {
+      cm.indiv[i,,] <- t(as.matrix(blup(rmalist[[i]]))[,c("pred","se")])
+    }
+    # conditional moments for overall mean (mu): 
+    #cm.overall <- x$cond.moment(tau=tau)
+    cm.overall <- matrix(NA_real_, nrow=length(tau), ncol=2,
+                         dimnames=list(names(rmalist), c("mean","sd")))
+    for (i in 1:length(tau)) {
+      cm.overall[i,] <- c(rmalist[[i]]$b, rmalist[[i]]$se)
+    }
+    # determine axis range for "effect" (y-) axis
+    if (!is.null(mulim_overall) && (all(is.finite(mulim_overall)) && (mulim_overall[1] < mulim_overall[2]))) {
+      # user-defined:
+      murange <- mulim_overall
+    } else {
+      # based on data:
+      if (ci){
+        murange <- range(c(range(cm.indiv[,"mean",]-q975*cm.indiv[,"sd",]),
+                           range(cm.indiv[,"mean",]+q975*cm.indiv[,"sd",]),
+                           range(cm.overall[,"mean"]-q975*cm.overall[,"sd"]),
+                           range(cm.overall[,"mean"]+q975*cm.overall[,"sd"])))
+      } else {
+        murange <- range(c(range(cm.indiv[,"mean",]),
+                           range(cm.overall[,"mean"])))
+      }
+      # ensure that estimates are also included:
+      if (infinity) murange <- range(murange, x$yi)
+    }
+
+    plot(taurange, murange, xlim=xlim,
+         type="n", axes=FALSE, xlab="", ylab = ylab, main="", ...)
+    abline(v=vertlines, col=gridcol)
+    abline(h=0, col="black", lty=3, lwd=2)
+    abline(h=pretty(murange), col=gridcol)
+    abline(v=0, col=grey(0.40))
+    #  CI shading:
+    color_from_palette <- RColorBrewer::brewer.pal(1, "Set2")[1]
+    transparent_color <- adjustcolor(color_from_palette, alpha.f = 0.25)
+    if (ci_overall) {
+      polygon(c(tau, rev(tau)),
+              c(cm.overall[,"mean"] - q975*cm.overall[,"sd"],
+                rev(cm.overall[,"mean"] + q975*cm.overall[,"sd"])),
+              col=transparent_color, border=NA)
+    }    
+    # overall mean:
+    lines(tau, cm.overall[,"mean"], col=meancol, lty=2, lwd=1.5)
+    if (ci_overall) {
+      lines(tau, cm.overall[,"mean"]-q975*cm.overall[,"sd"], col=meancol, lty=3, lwd=1.5)
+      lines(tau, cm.overall[,"mean"]+q975*cm.overall[,"sd"], col=meancol, lty=3, lwd=1.5)
+    }
+    if (infinity) {
+      labpos.indiv   <- x$yi
+      labpos.overall <- mean(x$yi)
+      for (i in 1:x$k)
+        lines(c(max(tau), infx),
+              c(cm.indiv[length(tau),"mean",i], labpos.indiv[i]),
+              col=col[i], lty="13", lwd=1.5)
+      lines(c(max(tau), infx),
+            c(cm.overall[length(tau),"mean"], labpos.overall),
+            col=meancol, lty="13", lwd=2.0)
+    } else {
+      labpos.indiv   <- cm.indiv[length(tau),"mean",]
+      labpos.overall <- cm.overall[length(tau),"mean"]
+    }
+    axis(2)
+    axis(side=4, at=labpos.overall,
+         labels=meanlabel, tick=FALSE,
+         col.axis=meanlabcol, las=1)
+    axis(side=4, at=0,
+         labels= "No effect", tick=FALSE,
+         col.axis=meanlabcol, las=1)
+    invisible()
+  }
+  
+  tauplot <- function(x)
+  # NB: function is (essentially) identical to the one within "plot.bayesmeta()"
+  {
+    # generalized Q-statistics (as a function of tau):
+    genQ <- function(t)
+    {
+      stopifnot(length(t)==1, is.finite(t), t>=0)
+      wi <- 1 / (x$vi + t^2)
+      muhat <- sum(x$yi*wi) / sum(wi)
+      return(sum(wi * (x$yi - muhat)^2))
+    }
+    genQstat <- apply(matrix(tau, ncol=1), 1, genQ)
+    # deviance:
+    devi <- sapply(rmalist, deviance)
+    # empty plot:
+    maxQ <- max(genQstat, na.rm=TRUE)
+    chisq95 <- qchisq(c(0.025, 0.975), df=x$k-1)
+    plot(c(taurange[1],taurange[2]), c(0,max(maxQ, chisq95)), xlim=xlim,       
+         type="n", axes=FALSE, xlab="", ylab=expression(Q(tau)), main="")
+    abline(v=vertlines, col=gridcol)
+    # line for upper 95% tau range:
+    upper <- uppertaulim(0.95)
+    lower <- confint(x, control=list(tau2.max=upper^2+1))$random["tau","ci.lb"]
+    abline(v=min(c(tau[length(tau)], upper)), col="red", lty=3, lwd=3)
+    arrows(x0 = 0.02, y0 = 15, x1 = 0.34, y1 = 15, 
+       col = "red", lwd = 2, code = 3)
+    text(x = 0.185, y = 18, labels = expression("95%CI for "*tau), col = "red", cex = 1.5)
+    # actual line:
+    lines(tau, genQstat, col="black")
+    # estimate, confidence bounds:
+    esti <- sqrt(x$tau2)
+    abline(v=esti, col="black", lty="dashed", lwd=1.5)
+    # y-axis:
+    abline(v=0, col=grey(0.40))
+    # x-axis:
+    lines(taurange + c(-1,1) * 0.04*diff(taurange), c(0,0), col=grey(0.40))
+    if (deviance) {
+      ymax <- max(maxQ, chisq95)
+      reldevi <- devi-min(devi)
+      lines(tau, reldevi * ymax/max(reldevi), col=devicol, lty="dashed")
+      lines(range(tau), rep(qchisq(0.95, df=1),2) * ymax/max(reldevi),
+            col=devicol, lty="dotted")
+      ticks <- pretty(c(0,max(reldevi)))
+      axis(4, at=ticks * ymax/max(reldevi), lab=ticks,
+           col=devicol, col.axis=devicol)
+      mtext(side=4, line=par("mgp")[1], "deviance", col=devicol)
+    }
+    # add axes, labels, bounding box, ...
+    mtext(side=1, line=par("mgp")[1], expression("Heterogeneity "*tau))
+    if (infinity) {
+      axis(1, at=c(vertlines, infx),
+           labels=c(as.numeric(vertlines), expression(infinity)))
+    } else {
+      axis(1, at=vertlines)
+    }
+    axis(2)
+    invisible()
+  }
+
+  # make sure to properly re-set graphical parameters later:
+  prevpar <- par(no.readonly=TRUE)
+  on.exit(par(prevpar))
+  # generate actual plot:
+  graphics::layout(rbind(1, 2, 3), heights=c(2, 1, 1))
+  par(mar=c(3,3,3,rightmargin)+0.1, mgp=c(2.0, 0.8, 0))
+  mutrace(x)
+  mtext("A", side=3, line=0.5, adj=0, cex=1.5)
+  par(mar=c(3,3,0,rightmargin)+0.1, mgp=c(2.0, 0.8, 0))
+  mu_overall(x)
+  mtext("B", side=3, line=0.5, adj=0, cex=1.5)
+  par(mar=c(3,3,-0.1,rightmargin)+0.1)
+  tauplot(x)
+  mtext("C", side=3, line=0.5, adj=0, cex=1.5)
+  graphics::layout(1)
+  par(mar=c(5,4,4,2)+0.1, mgp=c(3,1,0))
+  invisible()
+}
+
+traceplot.rma.uni(res_random, ylab="Log relative risk", 
+                  ci_overall = TRUE,
+                  mulim_overall = c(-0.5, 1))
+
+```
